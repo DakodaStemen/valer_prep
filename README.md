@@ -1,70 +1,79 @@
 # Valer Automation POC
 
-Production-ready Python-based automation proof-of-concept demonstrating web scraping, portal automation, and containerization. This project simulates logging into a healthcare provider portal, extracting patient authorization data, and persisting it to a PostgreSQL database.
+A Python automation proof-of-concept that demonstrates web scraping, portal automation, and containerization. This project simulates logging into a healthcare provider portal, extracting patient authorization data, and persisting it to PostgreSQL.
+
+## What This Does
+
+The scraper logs into a portal (using the-internet.herokuapp.com for demo purposes), extracts table data, and stores it in a PostgreSQL database. Everything runs in Docker containers with proper health checks and error handling.
 
 ## Architecture
 
-The project follows a modular architecture with clear separation of concerns:
+Pretty straightforward modular setup:
 
-- **main.py**: Entry point and orchestration
-- **scraper.py**: Selenium-based web automation
-- **database.py**: SQLAlchemy session management and persistence
-- **models.py**: Database schema definitions
+- `main.py` - Entry point that orchestrates everything
+- `scraper.py` - Selenium automation for portal interaction
+- `database.py` - SQLAlchemy session management
+- `models.py` - Database schema definitions
 
 ## Prerequisites
 
 - Docker and Docker Compose
-- Git
+- Git (obviously)
 
 ## Quick Start
 
-1. Clone the repository and navigate to the project directory.
+1. Clone the repo:
+   ```bash
+   git clone https://github.com/DakodaStemen/valer_prep.git
+   cd valer_prep
+   ```
 
-2. Copy the environment template:
+2. Set up environment variables:
    ```bash
    cp .env.example .env
    ```
+   Edit `.env` if you need to change any defaults.
 
-3. Edit `.env` if you need to customize database credentials or portal settings.
-
-4. Build and run the application:
+3. Build and run:
    ```bash
-   docker-compose up --build
+   docker compose up --build
    ```
 
-The application will:
-- Start a PostgreSQL container
-- Wait for the database to be healthy
-- Initialize the database schema
-- Execute the automation workflow (login → extract → persist)
-- Log all operations to stdout
+The app will:
+- Spin up a PostgreSQL container
+- Wait for the DB to be healthy (health checks are important!)
+- Initialize the schema
+- Run the scraper (login → extract → save to DB)
+- Log everything to stdout
 
 ## Environment Variables
 
-See `.env.example` for all available configuration options:
+Check `.env.example` for the full list. Main ones:
 
-- **Database**: `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_HOST`, `DB_PORT`
-- **Portal**: `PORTAL_USERNAME`, `PORTAL_PASSWORD`
-- **Selenium**: `SELENIUM_HEADLESS` (true/false)
+- `DB_USER`, `DB_PASSWORD`, `DB_NAME` - Database credentials
+- `PORTAL_USERNAME`, `PORTAL_PASSWORD` - Portal login (defaults work for the-internet.herokuapp.com)
+- `SELENIUM_HEADLESS` - Set to `true` for headless mode (default)
 
 ## Database Schema
 
-The `patient_auth` table stores patient authorization records:
+The `patient_auth` table has:
+- `id` - Primary key
+- `patient_name` - Patient name
+- `auth_number` - Unique authorization number
+- `status` - Status (Pending/Approved)
+- `created_at` - Timestamp
 
-- `id`: Primary key
-- `patient_name`: Patient name
-- `auth_number`: Unique authorization number
-- `status`: Authorization status (Pending/Approved)
-- `created_at`: Timestamp
+Uses upsert logic, so running it multiple times won't create duplicates.
 
-## Development
+## Running Locally (Without Docker)
 
-To run locally without Docker:
+If you want to run it directly:
 
-1. Install Python 3.11+
-2. Install dependencies: `pip install -r requirements.txt`
-3. Set up PostgreSQL and configure `.env`
-4. Run: `python main.py`
+```bash
+pip install -r requirements.txt
+# Make sure PostgreSQL is running and update .env
+python main.py
+```
 
 ## Project Structure
 
@@ -75,16 +84,25 @@ To run locally without Docker:
 ├── database.py          # Database operations
 ├── models.py            # SQLAlchemy models
 ├── Dockerfile           # Multi-stage build
-├── docker-compose.yml   # Container orchestration
-├── requirements.txt     # Python dependencies
-├── .env.example         # Environment template
+├── docker-compose.yml   # Container setup
+├── requirements.txt     # Dependencies
+├── .env.example         # Env template
 └── README.md            # This file
 ```
 
 ## Notes
 
-- The scraper uses `the-internet.herokuapp.com` for demonstration purposes
-- All database operations use upsert logic (merge on conflict)
-- Chrome runs in headless mode by default in Docker
-- The application includes comprehensive error handling and logging
+- Uses explicit waits throughout (WebDriverWait) to handle slow portals
+- Multi-stage Dockerfile for smaller image size
+- Health checks ensure the app waits for DB to be ready
+- Error handling with retry logic for stale elements
+- All secrets live in `.env` (never committed)
 
+## Troubleshooting
+
+If the build fails with `apt-key` errors, make sure you're using the latest Dockerfile - it uses the modern GPG keyring method.
+
+To check if data was saved:
+```bash
+docker compose exec postgres psql -U postgres -d valer_db -c "SELECT * FROM patient_auth;"
+```

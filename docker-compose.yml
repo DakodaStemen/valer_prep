@@ -40,7 +40,7 @@ services:
       SELENIUM_HEADLESS: ${SELENIUM_HEADLESS:-true}
     networks:
       - valer_network
-    restart: unless-stopped
+    restart: "no"
 
 volumes:
   postgres_data:

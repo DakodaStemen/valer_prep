@@ -91,6 +91,9 @@ class PortalScraper:
     def login(self, username: str, password: str) -> bool:
         """Simulate login to healthcare portal.
 
+        Uses explicit waits at each step to handle slow-loading portals.
+        Demonstrates proper wait strategies for form interactions.
+
         Args:
             username: Portal username
             password: Portal password
@@ -109,28 +112,58 @@ class PortalScraper:
 
             wait = WebDriverWait(self.driver, self.timeout)
 
+            # Wait for page to be fully loaded before interacting
+            wait.until(lambda driver: driver.execute_script("return document.readyState") == "complete")
+
+            # Wait for form to be present and visible (not just in DOM)
+            wait.until(
+                EC.presence_of_element_located((By.ID, "login"))
+            )
+
+            # Wait for username field to be visible and interactable
             username_field = wait.until(
-                EC.presence_of_element_located((By.ID, "username"))
+                EC.visibility_of_element_located((By.ID, "username"))
             )
+            wait.until(EC.element_to_be_clickable((By.ID, "username")))
+
+            # Wait for password field to be visible and interactable
             password_field = wait.until(
-                EC.presence_of_element_located((By.ID, "password"))
+                EC.visibility_of_element_located((By.ID, "password"))
             )
+            wait.until(EC.element_to_be_clickable((By.ID, "password")))
+
+            # Wait for login button to be clickable (ensures form is ready)
             login_button = wait.until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
             )
 
+            # Clear and fill fields with explicit waits between actions
             username_field.clear()
+            wait.until(lambda _: username_field.get_attribute("value") == "" or username_field.get_attribute("value") is None)
             username_field.send_keys(username)
+            wait.until(lambda _: username_field.get_attribute("value") == username)
 
             password_field.clear()
+            wait.until(lambda _: password_field.get_attribute("value") == "" or password_field.get_attribute("value") is None)
             password_field.send_keys(password)
+            wait.until(lambda _: password_field.get_attribute("value") == password)
 
+            # Click login button and wait for navigation/response
             login_button.click()
 
+            # Wait for either success or error message to appear (handles slow responses)
             wait.until(
                 EC.any_of(
                     EC.presence_of_element_located((By.CSS_SELECTOR, ".flash.success")),
                     EC.presence_of_element_located((By.CSS_SELECTOR, ".flash.error")),
+                )
+            )
+
+            # Additional wait to ensure flash message is visible
+            wait.until(
+                EC.any_of(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, ".flash.success")),
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, ".flash.error")),
                 )
             )
 
@@ -155,6 +188,9 @@ class PortalScraper:
     def get_authorizations(self) -> List[Dict[str, str]]:
         """Extract patient authorization data from portal table.
 
+        Uses explicit waits throughout to handle slow-loading portals gracefully.
+        Implements retry logic for stale elements to demonstrate robust error handling.
+
         Returns:
             List of dictionaries containing patient authorization data
 
@@ -173,41 +209,105 @@ class PortalScraper:
 
             wait = WebDriverWait(self.driver, self.timeout)
 
-            table = wait.until(
-                EC.presence_of_element_located((By.ID, "table1"))
+            # Wait for page to be fully loaded (explicit wait for document ready)
+            wait.until(lambda driver: driver.execute_script("return document.readyState") == "complete")
+
+            # Wait for table to be present and visible (not just in DOM)
+            wait.until(
+                EC.visibility_of_element_located((By.ID, "table1"))
             )
 
-            rows = wait.until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "#table1 tbody tr"))
+            # Wait for table body to be present before looking for rows
+            wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "#table1 tbody"))
             )
+
+            # Wait for at least one row to be present (handles slow-loading tables)
+            wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "#table1 tbody tr"))
+            )
+
+            # Additional wait to ensure all rows are loaded (explicit wait for multiple elements)
+            rows = wait.until(
+                lambda driver: driver.find_elements(By.CSS_SELECTOR, "#table1 tbody tr")
+            )
+
+            if not rows:
+                logger.warning("No rows found in table")
+                return []
+
+            logger.info(f"Found {len(rows)} rows to process")
 
             authorizations: List[Dict[str, str]] = []
+            max_retries = 3
 
-            for row in rows:
-                try:
-                    cells = row.find_elements(By.TAG_NAME, "td")
-                    if len(cells) < 4:
-                        continue
+            for idx, row in enumerate(rows):
+                retry_count = 0
+                while retry_count < max_retries:
+                    try:
+                        # Re-find row on each retry to avoid stale element
+                        if retry_count > 0:
+                            rows = self.driver.find_elements(By.CSS_SELECTOR, "#table1 tbody tr")
+                            if idx >= len(rows):
+                                break
+                            row = rows[idx]
 
-                    last_name = cells[0].text.strip()
-                    first_name = cells[1].text.strip()
-                    due_amount = cells[3].text.strip()
+                        # Wait for cells to be present within the row
+                        cells = WebDriverWait(row, 10).until(
+                            lambda r: r.find_elements(By.TAG_NAME, "td")
+                        )
 
-                    patient_name = f"{first_name} {last_name}".strip()
-                    auth_number = due_amount.replace("$", "").replace(",", "").strip()
+                        if len(cells) < 4:
+                            logger.warning(f"Row {idx + 1} has insufficient cells, skipping")
+                            break
 
-                    if patient_name and auth_number:
-                        authorizations.append({
-                            "patient_name": patient_name,
-                            "auth_number": auth_number,
-                            "status": "Pending",
-                        })
-                except StaleElementReferenceException:
-                    logger.warning("Stale element reference encountered, skipping row")
-                    continue
-                except Exception as e:
-                    logger.warning(f"Error processing row: {e}")
-                    continue
+                        # Bind cell to local variable to avoid closure bug
+                        cell_0 = cells[0]
+                        cell_1 = cells[1]
+                        cell_3 = cells[3]
+
+                        # Wait for cell text to be non-empty (handles slow-rendering content)
+                        # We use lambda d: ... to accept the driver argument from wait.until but ignore it,
+                        # accessing cell_0 directly from the closure.
+                        last_name_cell = wait.until(
+                            lambda d: cell_0.text.strip() if cell_0.text.strip() else None
+                        )
+                        first_name_cell = cell_1.text.strip()
+                        due_amount_cell = cell_3.text.strip()
+
+                        if not last_name_cell or not due_amount_cell:
+                            logger.warning(f"Row {idx + 1} has empty required fields, skipping")
+                            break
+
+                        patient_name = f"{first_name_cell} {last_name_cell}".strip()
+                        auth_number = due_amount_cell.replace("$", "").replace(",", "").strip()
+
+                        if patient_name and auth_number:
+                            authorizations.append({
+                                "patient_name": patient_name,
+                                "auth_number": auth_number,
+                                "status": "Pending",
+                            })
+                            break
+                        else:
+                            # If patient_name or auth_number is empty after processing, skip this row
+                            logger.warning(f"Row {idx + 1} has invalid data after processing (empty name or auth_number), skipping")
+                            break
+
+                    except StaleElementReferenceException:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            logger.debug(f"Stale element on row {idx + 1}, retrying ({retry_count}/{max_retries})")
+                            continue
+                        else:
+                            logger.warning(f"Stale element on row {idx + 1} after {max_retries} retries, skipping")
+                            break
+                    except TimeoutException:
+                        logger.warning(f"Timeout waiting for row {idx + 1} content, skipping")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Error processing row {idx + 1}: {e}")
+                        break
 
             logger.info(f"Extracted {len(authorizations)} authorization records")
             return authorizations

@@ -1,10 +1,12 @@
 """Database connection and session management."""
 
 import os
+from contextlib import contextmanager
 from typing import Generator, Optional
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -28,7 +30,7 @@ def get_database_url() -> str:
     return database_url
 
 
-def create_engine_instance() -> create_engine:
+def create_engine_instance() -> Engine:
     """Create and return SQLAlchemy engine instance."""
     database_url = get_database_url()
     return create_engine(
@@ -51,6 +53,7 @@ def init_db() -> None:
         raise RuntimeError(f"Failed to initialize database: {e}") from e
 
 
+@contextmanager
 def get_db_session() -> Generator[Session, None, None]:
     """Get database session with proper lifecycle management."""
     session = SessionLocal()
@@ -100,6 +103,7 @@ def upsert_patient_auth(
         status=status,
     )
     session.add(new_record)
+    session.flush()
     return new_record
 
 

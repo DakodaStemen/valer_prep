@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import time
 from typing import List, Dict
 
 from dotenv import load_dotenv
@@ -107,22 +108,20 @@ def main() -> int:
         logger.info(f"Extracted {len(authorizations)} authorization records")
 
         logger.info("Persisting authorizations to database...")
-        session_gen = get_db_session()
-        session = next(session_gen)
-
+        
         try:
-            processed = persist_authorizations(session, authorizations)
-            logger.info(f"Successfully persisted {processed}/{len(authorizations)} records")
+            with get_db_session() as session:
+                processed = persist_authorizations(session, authorizations)
+                logger.info(f"Successfully persisted {processed}/{len(authorizations)} records")
         except Exception as e:
-            logger.error(f"Error persisting authorizations: {e}")
+            logging.exception(f"Error persisting authorizations: {e}")
             return 1
-        finally:
-            try:
-                next(session_gen, None)
-            except StopIteration:
-                pass
-
         logger.info("Automation workflow completed successfully")
+        
+        # Keep container alive for inspection
+        logger.info("Keeping container alive for 1 hour...")
+        time.sleep(3600)
+        
         return 0
 
     except KeyboardInterrupt:
