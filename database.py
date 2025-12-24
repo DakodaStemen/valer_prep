@@ -3,14 +3,15 @@
 import os
 from contextlib import contextmanager
 from typing import Generator, Optional
+from datetime import datetime
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, desc
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 
-from models import Base, PatientAuth
+from models import Base, PatientAuth, ScrapeRun
 
 load_dotenv()
 
@@ -119,4 +120,90 @@ def check_db_connection() -> bool:
         return True
     except SQLAlchemyError:
         return False
+
+
+def create_scrape_run(session: Session) -> ScrapeRun:
+    """Create a new scrape run record.
+
+    Args:
+        session: SQLAlchemy session
+
+    Returns:
+        ScrapeRun instance with started_at timestamp
+    """
+    scrape_run = ScrapeRun(
+        started_at=datetime.utcnow(),
+        status="running",
+        records_found=0,
+        records_saved=0,
+    )
+    session.add(scrape_run)
+    session.flush()
+    return scrape_run
+
+
+def update_scrape_run(
+    session: Session,
+    scrape_run_id: int,
+    records_found: int,
+    records_saved: int,
+    status: str = "success",
+    error_message: Optional[str] = None,
+) -> ScrapeRun:
+    """Update a scrape run with completion data and metrics.
+
+    Args:
+        session: SQLAlchemy session
+        scrape_run_id: ID of the scrape run to update
+        records_found: Number of records found during scrape
+        records_saved: Number of records successfully saved
+        status: Final status ('success' or 'failed')
+        error_message: Error message if status is 'failed'
+
+    Returns:
+        Updated ScrapeRun instance
+
+    Raises:
+        ValueError: If scrape_run_id not found
+    """
+    scrape_run = session.query(ScrapeRun).filter_by(id=scrape_run_id).first()
+    if not scrape_run:
+        raise ValueError(f"ScrapeRun with id {scrape_run_id} not found")
+
+    scrape_run.completed_at = datetime.utcnow()
+    scrape_run.records_found = records_found
+    scrape_run.records_saved = records_saved
+    scrape_run.status = status
+    scrape_run.error_message = error_message
+
+    if scrape_run.started_at and scrape_run.completed_at:
+        delta = scrape_run.completed_at - scrape_run.started_at
+        scrape_run.duration_seconds = delta.total_seconds()
+
+    session.flush()
+    return scrape_run
+
+
+def get_latest_scrape_run(session: Session) -> Optional[ScrapeRun]:
+    """Get the most recent scrape run.
+
+    Args:
+        session: SQLAlchemy session
+
+    Returns:
+        Most recent ScrapeRun instance, or None if no runs exist
+    """
+    return session.query(ScrapeRun).order_by(desc(ScrapeRun.started_at)).first()
+
+
+def get_total_records_count(session: Session) -> int:
+    """Get total count of patient authorization records.
+
+    Args:
+        session: SQLAlchemy session
+
+    Returns:
+        Total number of records in patient_auth table
+    """
+    return session.query(PatientAuth).count()
 

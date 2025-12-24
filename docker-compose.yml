@@ -38,6 +38,11 @@ services:
       PORTAL_USERNAME: ${PORTAL_USERNAME:-tomsmith}
       PORTAL_PASSWORD: ${PORTAL_PASSWORD:-SuperSecretPassword!}
       SELENIUM_HEADLESS: ${SELENIUM_HEADLESS:-true}
+      FLASK_PORT: ${FLASK_PORT:-5000}
+      FLASK_ENV: ${FLASK_ENV:-production}
+    ports:
+      - "5000:5000"
+    command: python app.py
     networks:
       - valer_network
     restart: "no"

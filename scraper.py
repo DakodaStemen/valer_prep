@@ -1,8 +1,7 @@
 """Selenium-based web scraper for healthcare portal automation."""
 
-import os
 import logging
-from typing import List, Dict, Optional, Generator
+from typing import List, Dict, Optional, Generator, Callable
 from contextlib import contextmanager
 
 from dotenv import load_dotenv
@@ -322,12 +321,19 @@ class PortalScraper:
             logger.error(f"Unexpected error extracting authorizations: {e}")
             raise
 
-    def run_full_extraction(self, username: str, password: str) -> List[Dict[str, str]]:
+    def run_full_extraction(
+        self,
+        username: str,
+        password: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> List[Dict[str, str]]:
         """Execute full workflow: login and extract authorizations.
 
         Args:
             username: Portal username
             password: Portal password
+            progress_callback: Optional callback function for progress updates.
+                Called with status string at key milestones.
 
         Returns:
             List of authorization records
@@ -335,9 +341,22 @@ class PortalScraper:
         Raises:
             RuntimeError: If login fails or extraction fails
         """
+        if progress_callback:
+            progress_callback("Starting login process...")
+
         with self._driver_context():
             if not self.login(username, password):
+                if progress_callback:
+                    progress_callback("Login failed")
                 raise RuntimeError("Login failed, cannot proceed with extraction")
 
-            return self.get_authorizations()
+            if progress_callback:
+                progress_callback("Login successful, extracting authorizations...")
+
+            authorizations = self.get_authorizations()
+
+            if progress_callback:
+                progress_callback(f"Extraction complete: {len(authorizations)} records found")
+
+            return authorizations
 
